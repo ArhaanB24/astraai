@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: arthaai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-arthaai}
+      POSTGRES_USER: ${POSTGRES_USER:-artha_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-artha_password}
+    volumes:
+      - arthaai_pg_data:/var/lib/postgresql/data
+    networks:
+      - arthaai-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-artha_user} -d ${POSTGRES_DB:-arthaai}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: arthaai-backend
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-artha_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-artha_password}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-arthaai}
+      - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-artha_user}:${POSTGRES_PASSWORD:-artha_password}@postgres:5432/${POSTGRES_DB:-arthaai}
+      - SECRET_KEY=${SECRET_KEY:-dev_secret_key_change_in_production_1234567890}
+      - ALGORITHM=${ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      - LLM_MODEL=${LLM_MODEL:-gemini-2.5-flash}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - AWS_DEFAULT_REGION=${AWS_REGION:-ap-south-1}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME:-arthaai-user-storage-195231312586}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - arthaai-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: arthaai-frontend
+    restart: unless-stopped
+    environment:
+      - NEXT_PUBLIC_API_URL=/api/v1
+    depends_on:
+      - backend
+    networks:
+      - arthaai-net
+
+  nginx:
+    image: nginx:alpine
+    container_name: arthaai-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - arthaai-net
+
+volumes:
+  arthaai_pg_data:
+    name: arthaai_pg_data
+
+networks:
+  arthaai-net:
+    name: arthaai-net
+    driver: bridge
